@@ -1,36 +1,53 @@
 [DllImport("ntdll.dll")]
 private static extern int NtCreateThreadEx(
-  out IntPtr threadHandle,
-  uint desiredAccess,
-  IntPtr objectAttributes,
-  IntPtr processHandle,
-  IntPtr startAddress,
-  IntPtr parameter,
-  bool createSuspended,
-  int stackZeroBits,
-  int sizeOfStack,
-  int maximumStackSize,
-  IntPtr attributeList
+    out IntPtr threadHandle,
+    uint desiredAccess,
+    IntPtr objectAttributes,
+    IntPtr processHandle,
+    IntPtr startAddress,
+    IntPtr parameter,
+    bool createSuspended,
+    int stackZeroBits,
+    int sizeOfStack,
+    int maximumStackSize,
+    IntPtr attributeList
 );
 
-public static IntPtr CreateRemoteThreadNative(IntPtr processHandle, IntPtr startAddress, IntPtr parameter)
+private const uint THREAD_ALL_ACCESS = 0x1FFFFF;
+
+/// <summary>
+/// Creates a remote thread in the specified process using NtCreateThreadEx.
+/// </summary>
+/// <param name="processHandle">Handle to the target process.</param>
+/// <param name="startAddress">Start address of the thread (usually address of shellcode).</param>
+/// <param name="parameter">Parameter passed to the thread function.</param>
+/// <param name="createSuspended">Whether to create the thread in a suspended state.</param>
+/// <returns>Handle to the created thread.</returns>
+/// <exception cref="Exception">Thrown if NtCreateThreadEx fails.</exception>
+public static IntPtr CreateRemoteThreadNative(
+    IntPtr processHandle,
+    IntPtr startAddress,
+    IntPtr parameter,
+    bool createSuspended = false)
 {
-    IntPtr threadHandle;
     int status = NtCreateThreadEx(
-        out threadHandle,
-        0x1FFFFF,  // All access
+        out IntPtr threadHandle,
+        THREAD_ALL_ACCESS,
         IntPtr.Zero,
         processHandle,
         startAddress,
         parameter,
-        false,   // Run immediately (not suspended)
+        createSuspended,
         0,
         0,
         0,
         IntPtr.Zero);
 
     if (status != 0)
-        throw new Exception($"NtCreateThreadEx failed: 0x{status:X}");
+        throw new Exception($"NtCreateThreadEx failed with status 0x{status:X}");
 
     return threadHandle;
 }
+
+//Usage
+CreateRemoteThreadNative(processHandle, remoteAddress, IntPtr.Zero);
