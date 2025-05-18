@@ -1,99 +1,100 @@
-// Constants for the memory allocations attributes
 public static class NativeConstants
 {
     public const int SECTION_ALL_ACCESS = 0x10000000;
     public const uint PAGE_EXECUTE_READWRITE = 0x40;
     public const uint SEC_COMMIT = 0x08000000;
+
     public const uint SECTION_MAP_READ = 0x0004;
     public const uint SECTION_MAP_WRITE = 0x0002;
     public const uint SECTION_MAP_EXECUTE = 0x0008;
+
+    public const uint ViewShare = 1;
 }
 
-// NtCreateSection Signature
-[DllImport("ntdll.dll")]
-public static extern int NtCreateSection(
-    out IntPtr SectionHandle,
-    int DesiredAccess,
-    IntPtr ObjectAttributes,
-    IntPtr MaximumSize, // pointer to LARGE_INTEGER (optional, can be null)
-    uint SectionPageProtection,
-    uint AllocationAttributes,
-    IntPtr FileHandle
+public static class SectionManager
+{
+    [DllImport("ntdll.dll")]
+    public static extern int NtCreateSection(
+        out IntPtr SectionHandle,
+        int DesiredAccess,
+        IntPtr ObjectAttributes,
+        ref long MaximumSize,
+        uint SectionPageProtection,
+        uint AllocationAttributes,
+        IntPtr FileHandle
     );
 
-// CreateSection function
-public static IntPtr CreateSection(ulong size)
-{
-    IntPtr sectionHandle;
-
-        // Allocate memory for LARGE_INTEGER
-    long largeSize = (long)size;
-    IntPtr maxSizePtr = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(long)));
-    Marshal.WriteInt64(maxSizePtr, largeSize);
-
-    int status = NtCreateSection(
-        out sectionHandle,
-        NativeConstants.SECTION_ALL_ACCESS,
-        IntPtr.Zero,
-        maxSizePtr,
-        NativeConstants.PAGE_EXECUTE_READWRITE,
-        NativeConstants.SEC_COMMIT,
-        IntPtr.Zero // Not backed by a file
+    [DllImport("ntdll.dll")]
+    public static extern int NtMapViewOfSection(
+        IntPtr SectionHandle,
+        IntPtr ProcessHandle,
+        out IntPtr BaseAddress,
+        UIntPtr ZeroBits,
+        UIntPtr CommitSize,
+        IntPtr SectionOffset,
+        ref ulong ViewSize,
+        uint InheritDisposition,
+        uint AllocationType,
+        uint Win32Protect
     );
 
-    Marshal.FreeHGlobal(maxSizePtr);
-
-    if (status != 0) // STATUS_SUCCESS == 0
+    public static IntPtr CreateSection(ulong size)
     {
-        throw new Exception($"NtCreateSection failed: 0x{status:X}");
+        if (size == 0)
+            throw new ArgumentOutOfRangeException(nameof(size), "Section size must be greater than zero.");
+
+        long maxSize = (long)size;
+        int status = NtCreateSection(
+            out IntPtr sectionHandle,
+            NativeConstants.SECTION_ALL_ACCESS,
+            IntPtr.Zero,
+            ref maxSize,
+            NativeConstants.PAGE_EXECUTE_READWRITE,
+            NativeConstants.SEC_COMMIT,
+            IntPtr.Zero
+        );
+
+        if (status != 0)
+            throw new InvalidOperationException($"NtCreateSection failed with status 0x{status:X8}");
+
+        return sectionHandle;
     }
 
-    return sectionHandle;
-}
-
-// NtMapViewOfSection signature
-[DllImport("ntdll.dll")]
-public static extern int NtMapViewOfSection(
-    IntPtr SectionHandle,
-    IntPtr ProcessHandle,
-    out IntPtr BaseAddress,
-    UIntPtr ZeroBits,
-    UIntPtr CommitSize,
-    IntPtr SectionOffset,
-    ref ulong ViewSize,
-    uint InheritDisposition,
-    uint AllocationType,
-    uint Win32Protect
-);
-
-// Map section function
-public static IntPtr MapSectionToRemoteProcess(IntPtr sectionHandle, IntPtr remoteProcessHandle, ulong size)
-{
-    IntPtr baseAddress = IntPtr.Zero;
-    ulong viewSize = size;
-
-    int status = NtMapViewOfSection(
-        sectionHandle,
-        remoteProcessHandle,
-        out baseAddress,
-        UIntPtr.Zero,
-        UIntPtr.Zero,
-        IntPtr.Zero,
-        ref viewSize,
-        1, // ViewShare
-        0,
-        NativeConstants.PAGE_EXECUTE_READWRITE);
-
-    if (status != 0) // STATUS_SUCCESS == 0
+    public static IntPtr MapSectionToRemoteProcess(IntPtr sectionHandle, IntPtr remoteProcessHandle, ulong size)
     {
-        throw new Exception($"NtMapViewOfSection failed: 0x{status:X}");
-    }
+        if (sectionHandle == IntPtr.Zero)
+            throw new ArgumentException("Invalid section handle.", nameof(sectionHandle));
 
-    return baseAddress;
+        if (remoteProcessHandle == IntPtr.Zero)
+            throw new ArgumentException("Invalid remote process handle.", nameof(remoteProcessHandle));
+
+        ulong viewSize = size;
+        IntPtr baseAddress;
+
+        int status = NtMapViewOfSection(
+            sectionHandle,
+            remoteProcessHandle,
+            out baseAddress,
+            UIntPtr.Zero,
+            UIntPtr.Zero,
+            IntPtr.Zero,
+            ref viewSize,
+            NativeConstants.ViewShare,
+            0,
+            NativeConstants.PAGE_EXECUTE_READWRITE
+        );
+
+        if (status != 0)
+            throw new InvalidOperationException($"NtMapViewOfSection failed with status 0x{status:X8}");
+
+        return baseAddress;
+    }
 }
 
 //Usage:
+// Example size to map (1 page)
 ulong sizeToMap = 4096;
-IntPtr secHandle = CreateSection(sizeToMap);
-// Assume phandle (OpenProcess-equivalent.cs)
-IntPtr remoteMappedAddress = MapSectionToRemoteProcess(secHandle, phandle, sizeToMap);
+// Create a section
+IntPtr sectionHandle = SectionManager.CreateSection(sizeToMap);
+// Map to remote process (you must define `remoteProcessHandle` elsewhere)
+IntPtr remoteAddress = SectionManager.MapSectionToRemoteProcess(sectionHandle, remoteProcessHandle, sizeToMap);
