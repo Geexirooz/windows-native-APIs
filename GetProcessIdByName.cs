@@ -1,6 +1,3 @@
-using System;
-using System.Runtime.InteropServices;
-
 public enum SYSTEM_INFORMATION_CLASS
 {
     SystemProcessInformation = 5
